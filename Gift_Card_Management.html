@@ -407,6 +407,11 @@ firebase.initializeApp(FIREBASE_CONFIG);
 
 const database = firebase.database();
 
+database.ref("test").set({
+  name:"테스트",
+  time:new Date().toString()
+});
+
 const DB = {
   _ref(key){
     return database.ref("harehare/" + key);
@@ -490,16 +495,24 @@ function showToast(msg){
 /* ---------------- Load / Persist ---------------- */
 async function loadAll(){
   for(const s of STORES){
-    STATE.stores[s] = await DB.get('store_'+s, { records:[], pos:[] });
+const data = await DB.get('store_'+s, {});
+
+STATE.stores[s] = {
+  records: data.records || [],
+  pos: data.pos || []
+};
   }
   STATE.admin = await DB.get('admin', { supply:[], outbound:[], returns:[] });
 }
 async function saveStore(name){
   await DB.set(
     'store_'+name,
-    STATE.stores[name]
+    {
+      records: STATE.stores[name].records || [],
+      pos: STATE.stores[name].pos || []
+    }
   );
-}
+}do
 
 async function saveAdmin(){
   await DB.set(
@@ -1049,6 +1062,7 @@ function downloadExcel(){
   renderHome();
 
 })();
+
 </script>
 </body>
 </html>
