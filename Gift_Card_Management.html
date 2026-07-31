@@ -389,26 +389,51 @@
 <footer>HAREHARE 상품권 통합 관리 시스템 · 내부 관리용</footer>
 <div class="toast" id="toast"></div>
 
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
 <script>
-/* =========================================================================
-   DATA LAYER
-   지금은 localStorage 기반이지만, 아래 DB 객체의 함수 시그니처(비동기 Promise)를
-   그대로 유지한 채 내부 구현만 Firebase(Firestore) 호출로 교체하면
-   실시간 동기화 / 다중 사용자 접속 / 로그인 연동 구조로 확장할 수 있도록 설계함.
-   예) get() -> firebase firestore.collection(key).get()
-       set() -> firestore.collection(key).doc(...).set(value)
-   ========================================================================= */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBIXbG86g01_Xjz6hDIUOOWw2MUfu8AzDg",
+  authDomain: "gift-card-management-d3178.firebaseapp.com",
+  databaseURL: "https://gift-card-management-d3178-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "gift-card-management-d3178",
+  storageBucket: "gift-card-management-d3178.firebasestorage.app",
+  messagingSenderId: "303402561046",
+  appId: "1:303402561046:web:a5da6f4e4f3ba2238f0f37"
+};
+
+firebase.initializeApp(FIREBASE_CONFIG);
+
+const database = firebase.database();
+
 const DB = {
-  _key(k){ return "harehare_" + k; },
-  async get(key, fallback){
-    // TODO(Firebase 연동 시): return (await firestore.collection('harehare').doc(key).get()).data()?.value ?? fallback;
-    const raw = localStorage.getItem(this._key(key));
-    return raw ? JSON.parse(raw) : fallback;
+  _ref(key){
+    return database.ref("harehare/" + key);
   },
+
+  async get(key, fallback){
+    const snapshot = await this._ref(key).once("value");
+    return snapshot.exists() ? snapshot.val() : fallback;
+  },
+
   async set(key, value){
-    // TODO(Firebase 연동 시): await firestore.collection('harehare').doc(key).set({value});
-    localStorage.setItem(this._key(key), JSON.stringify(value));
+    await this._ref(key).set(value);
     return true;
+  },
+
+  // 여러 명 동시 추가용
+  async push(key, value){
+    const newRef = this._ref(key).push();
+    await newRef.set(value);
+    return newRef.key;
+  },
+
+  // 실시간 변경 감지
+  listen(key, callback){
+    this._ref(key).on("value", snapshot=>{
+      callback(snapshot.val());
+    });
   }
 };
 
@@ -469,8 +494,19 @@ async function loadAll(){
   }
   STATE.admin = await DB.get('admin', { supply:[], outbound:[], returns:[] });
 }
-async function saveStore(name){ await DB.set('store_'+name, STATE.stores[name]); }
-async function saveAdmin(){ await DB.set('admin', STATE.admin); }
+async function saveStore(name){
+  await DB.set(
+    'store_'+name,
+    STATE.stores[name]
+  );
+}
+
+async function saveAdmin(){
+  await DB.set(
+    'admin',
+    STATE.admin
+  );
+}
 
 /* ---------------- Routing ---------------- */
 function go(page, storeName){
@@ -568,8 +604,19 @@ async function addStoreRecord(){
   const qty = Number(document.getElementById('srQty').value || 0);
   const note = document.getElementById('srNote').value.trim();
   if(!qty){ showToast('수량을 입력해주세요'); return; }
-  STATE.stores[STATE.currentStore].records.push({id:uid(), date, type, qty, note});
-  await saveStore(STATE.currentStore);
+const record = {
+  id:uid(),
+  date,
+  type,
+  qty,
+  note
+};
+
+STATE.stores[STATE.currentStore].records.push(record);
+
+await saveStore(
+  STATE.currentStore
+);
   document.getElementById('srQty').value = '';
   document.getElementById('srNote').value = '';
   renderStorePage(STATE.currentStore);
@@ -968,8 +1015,39 @@ function downloadExcel(){
 
 /* ---------------- INIT ---------------- */
 (async function init(){
+
   await loadAll();
+
+  STORES.forEach(store=>{
+
+    DB.listen('store_'+store, data=>{
+
+      if(data){
+        STATE.stores[store]=data;
+
+        if(STATE.currentStore===store){
+          renderStorePage(store);
+        }
+      }
+
+    });
+
+  });
+
+  DB.listen('admin', data=>{
+
+    if(data){
+      STATE.admin=data;
+
+      if(document.getElementById('page-admin').classList.contains('active')){
+        renderAdminPage();
+      }
+    }
+
+  });
+
   renderHome();
+
 })();
 </script>
 </body>
