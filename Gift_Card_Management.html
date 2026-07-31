@@ -557,7 +557,7 @@ function renderHome(){
 
 /* ---------------- STORE PAGE ---------------- */
 function storeTotals(name){
-  const records = STATE.stores[name].records;
+ const records = STATE.stores[name].records || [];
   const totals = {};
   RECORD_TYPES.forEach(t=>totals[t]=0);
   records.forEach(r=>{ totals[r.type] = (totals[r.type]||0) + Number(r.qty||0); });
@@ -672,7 +672,10 @@ async function deleteStoreRecord(store, id){
 /* ---- POS 미반영 리스트 ---- */
 function renderPosList(name){
   const body = document.getElementById('storePosBody');
-  const list = STATE.stores[name].pos.slice().sort((a,b)=> b.date.localeCompare(a.date));
+
+  const list = (STATE.stores[name].pos || [])
+    .slice()
+    .sort((a,b)=> b.date.localeCompare(a.date));
   if(list.length === 0){
     body.innerHTML = `<tr class="empty-row"><td colspan="4">등록된 내역이 없습니다.</td></tr>`;
     return;
