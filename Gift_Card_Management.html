@@ -382,6 +382,21 @@
         </table>
       </div>
     </div>
+
+    <div class="panel">
+      <h3>🧾 환불 후 POS 미반영 현황 보고</h3>
+      <div class="desc">선택한 월 기준으로 매장별 환불 후 POS 미반영 건수와 금액을 집계합니다.</div>
+      <div class="toolbar">
+        <input type="month" id="posReportMonth" class="month-picker">
+        <button class="btn btn-outline btn-sm" onclick="renderPosReport()">조회</button>
+      </div>
+      <div class="table-wrap">
+        <table id="posReportTable">
+          <thead><tr id="posReportHead"></tr></thead>
+          <tbody id="posReportBody"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
 </main>
@@ -389,60 +404,30 @@
 <footer>HAREHARE 상품권 통합 관리 시스템 · 내부 관리용</footer>
 <div class="toast" id="toast"></div>
 
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
 <script>
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBIXbG86g01_Xjz6hDIUOOWw2MUfu8AzDg",
-  authDomain: "gift-card-management-d3178.firebaseapp.com",
-  databaseURL: "https://gift-card-management-d3178-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "gift-card-management-d3178",
-  storageBucket: "gift-card-management-d3178.firebasestorage.app",
-  messagingSenderId: "303402561046",
-  appId: "1:303402561046:web:a5da6f4e4f3ba2238f0f37"
-};
-
-firebase.initializeApp(FIREBASE_CONFIG);
-
-const database = firebase.database();
-
-database.ref("test").set({
-  name:"테스트",
-  time:new Date().toString()
-});
-
+/* =========================================================================
+   DATA LAYER
+   지금은 localStorage 기반이지만, 아래 DB 객체의 함수 시그니처(비동기 Promise)를
+   그대로 유지한 채 내부 구현만 Firebase(Firestore) 호출로 교체하면
+   실시간 동기화 / 다중 사용자 접속 / 로그인 연동 구조로 확장할 수 있도록 설계함.
+   예) get() -> firebase firestore.collection(key).get()
+       set() -> firestore.collection(key).doc(...).set(value)
+   ========================================================================= */
 const DB = {
-  _ref(key){
-    return database.ref("harehare/" + key);
-  },
-
+  _key(k){ return "harehare_" + k; },
   async get(key, fallback){
-    const snapshot = await this._ref(key).once("value");
-    return snapshot.exists() ? snapshot.val() : fallback;
+    // TODO(Firebase 연동 시): return (await firestore.collection('harehare').doc(key).get()).data()?.value ?? fallback;
+    const raw = localStorage.getItem(this._key(key));
+    return raw ? JSON.parse(raw) : fallback;
   },
-
   async set(key, value){
-    await this._ref(key).set(value);
+    // TODO(Firebase 연동 시): await firestore.collection('harehare').doc(key).set({value});
+    localStorage.setItem(this._key(key), JSON.stringify(value));
     return true;
-  },
-
-  // 여러 명 동시 추가용
-  async push(key, value){
-    const newRef = this._ref(key).push();
-    await newRef.set(value);
-    return newRef.key;
-  },
-
-  // 실시간 변경 감지
-  listen(key, callback){
-    this._ref(key).on("value", snapshot=>{
-      callback(snapshot.val());
-    });
   }
 };
 
-const STORES = ["도안점","둔산점","갤러리아점","유성점","건양대병원점"];
+const STORES = ["도안점","둔산점","갤러리아점","유성점","건양대점"];
 const RECORD_TYPES = ["관리부 수령","상품권 판매","고객 사용","재사용 상품권","폐기용 상품권"];
 const RETURN_TYPES = ["재사용 보관","폐기 처리"];
 
@@ -495,31 +480,12 @@ function showToast(msg){
 /* ---------------- Load / Persist ---------------- */
 async function loadAll(){
   for(const s of STORES){
-const data = await DB.get('store_'+s, {});
-
-STATE.stores[s] = {
-  records: data.records || [],
-  pos: data.pos || []
-};
+    STATE.stores[s] = await DB.get('store_'+s, { records:[], pos:[] });
   }
   STATE.admin = await DB.get('admin', { supply:[], outbound:[], returns:[] });
 }
-async function saveStore(name){
-  await DB.set(
-    'store_'+name,
-    {
-      records: STATE.stores[name].records || [],
-      pos: STATE.stores[name].pos || []
-    }
-  );
-}
-
-async function saveAdmin(){
-  await DB.set(
-    'admin',
-    STATE.admin
-  );
-}
+async function saveStore(name){ await DB.set('store_'+name, STATE.stores[name]); }
+async function saveAdmin(){ await DB.set('admin', STATE.admin); }
 
 /* ---------------- Routing ---------------- */
 function go(page, storeName){
@@ -557,7 +523,7 @@ function renderHome(){
 
 /* ---------------- STORE PAGE ---------------- */
 function storeTotals(name){
- const records = STATE.stores[name].records || [];
+  const records = STATE.stores[name].records;
   const totals = {};
   RECORD_TYPES.forEach(t=>totals[t]=0);
   records.forEach(r=>{ totals[r.type] = (totals[r.type]||0) + Number(r.qty||0); });
@@ -617,19 +583,8 @@ async function addStoreRecord(){
   const qty = Number(document.getElementById('srQty').value || 0);
   const note = document.getElementById('srNote').value.trim();
   if(!qty){ showToast('수량을 입력해주세요'); return; }
-const record = {
-  id:uid(),
-  date,
-  type,
-  qty,
-  note
-};
-
-STATE.stores[STATE.currentStore].records.push(record);
-
-await saveStore(
-  STATE.currentStore
-);
+  STATE.stores[STATE.currentStore].records.push({id:uid(), date, type, qty, note});
+  await saveStore(STATE.currentStore);
   document.getElementById('srQty').value = '';
   document.getElementById('srNote').value = '';
   renderStorePage(STATE.currentStore);
@@ -672,10 +627,7 @@ async function deleteStoreRecord(store, id){
 /* ---- POS 미반영 리스트 ---- */
 function renderPosList(name){
   const body = document.getElementById('storePosBody');
-
-  const list = (STATE.stores[name].pos || [])
-    .slice()
-    .sort((a,b)=> b.date.localeCompare(a.date));
+  const list = STATE.stores[name].pos.slice().sort((a,b)=> b.date.localeCompare(a.date));
   if(list.length === 0){
     body.innerHTML = `<tr class="empty-row"><td colspan="4">등록된 내역이 없습니다.</td></tr>`;
     return;
@@ -772,6 +724,11 @@ function renderAdminPage(){
     document.getElementById('reportMonth').value = todayStr().slice(0,7);
   }
   renderReport();
+
+  if(!document.getElementById('posReportMonth').value){
+    document.getElementById('posReportMonth').value = todayStr().slice(0,7);
+  }
+  renderPosReport();
 }
 
 /* -- 업체 납품 -- */
@@ -963,6 +920,36 @@ function renderReport(){
   }).join('');
 }
 
+/* -- 환불 후 POS 미반영 현황 보고 -- */
+function posMonthlyMatrix(month){
+  const counts = {}; const amounts = {};
+  STORES.forEach(s=>{ counts[s]=0; amounts[s]=0; });
+  STORES.forEach(s=>{
+    STATE.stores[s].pos.forEach(p=>{
+      if(!month || p.date.slice(0,7) === month){
+        counts[s] += 1;
+        amounts[s] += Number(p.amount||0);
+      }
+    });
+  });
+  return {counts, amounts};
+}
+
+function renderPosReport(){
+  const month = document.getElementById('posReportMonth').value;
+  const {counts, amounts} = posMonthlyMatrix(month);
+  const head = document.getElementById('posReportHead');
+  head.innerHTML = `<th>구분</th>` + STORES.map(s=>`<th>${s}</th>`).join('') + `<th>합계</th>`;
+  const body = document.getElementById('posReportBody');
+  let sumCount = 0, sumAmount = 0;
+  const countCells = STORES.map(s=>{ sumCount += counts[s]; return `<td>${fmtNum(counts[s])}</td>`; }).join('');
+  const amountCells = STORES.map(s=>{ sumAmount += amounts[s]; return `<td>${fmtNum(amounts[s])}원</td>`; }).join('');
+  body.innerHTML = `
+    <tr><td><strong>건수</strong></td>${countCells}<td><strong>${fmtNum(sumCount)}</strong></td></tr>
+    <tr><td><strong>금액</strong></td>${amountCells}<td><strong>${fmtNum(sumAmount)}원</strong></td></tr>
+  `;
+}
+
 /* ---------------- EXCEL EXPORT ---------------- */
 function downloadExcel(){
   const wb = XLSX.utils.book_new();
@@ -1031,41 +1018,9 @@ function downloadExcel(){
 
 /* ---------------- INIT ---------------- */
 (async function init(){
-
   await loadAll();
-
-  STORES.forEach(store=>{
-
-    DB.listen('store_'+store, data=>{
-
-      if(data){
-        STATE.stores[store]=data;
-
-        if(STATE.currentStore===store){
-          renderStorePage(store);
-        }
-      }
-
-    });
-
-  });
-
-  DB.listen('admin', data=>{
-
-    if(data){
-      STATE.admin=data;
-
-      if(document.getElementById('page-admin').classList.contains('active')){
-        renderAdminPage();
-      }
-    }
-
-  });
-
   renderHome();
-
 })();
-
 </script>
 </body>
 </html>
