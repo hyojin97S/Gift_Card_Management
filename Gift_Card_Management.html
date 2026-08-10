@@ -274,10 +274,39 @@
         <button class="btn btn-gold" onclick="addReturn()">＋ 추가</button>
       </div>
     </div>
+
+    <div class="panel">
+      <h3>📊 월말 상품권 현황 보고</h3>
+      <div class="desc">선택한 월 기준으로 매장별 상품권 현황을 집계합니다.</div>
+      <div class="toolbar">
+        <input type="month" id="reportMonth" class="month-picker">
+        <button class="btn btn-outline btn-sm" onclick="runStatusReport()">조회</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr id="statusReportHead"></tr></thead>
+          <tbody id="statusReportBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🧾 환불 후 POS 미반영 현황 보고</h3>
+      <div class="desc">선택한 월 기준으로 매장별 환불 후 POS 미반영 건수와 금액을 집계합니다.</div>
+      <div class="toolbar">
+        <input type="month" id="posReportMonth" class="month-picker">
+        <button class="btn btn-outline btn-sm" onclick="runPosReport()">조회</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr id="posReportHead"></tr></thead>
+          <tbody id="posReportBody"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 </main>
 
-<footer>HAREHARE 상품권 통합 관리 시스템 · 내부 관리용</footer>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -296,6 +325,7 @@ const DB = {
 const STORES = ["도안점","둔산점","갤러리아점","유성점","건양대점"];
 // 요청 반영: "현재 매장 보유" 항목 추가
 const RECORD_TYPES = ["관리부 수령", "현재 매장 보유", "상품권 판매", "고객 사용", "재사용 상품권", "폐기용 상품권"];
+const REPORT_TYPES = ["관리부 수령", "상품권 판매", "고객 사용", "재사용 상품권", "폐기용 상품권"];
 
 let STATE = {
   stores: {},
@@ -577,6 +607,14 @@ function renderAdminPage(){
   renderSupply();
   renderOutbound();
   renderReturns();
+
+  const curMonth = todayStr().slice(0,7);
+  const reportMonthEl = document.getElementById('reportMonth');
+  const posReportMonthEl = document.getElementById('posReportMonth');
+  if(!reportMonthEl.value) reportMonthEl.value = curMonth;
+  if(!posReportMonthEl.value) posReportMonthEl.value = curMonth;
+  runStatusReport();
+  runPosReport();
 }
 
 function renderSupply(){
@@ -767,6 +805,61 @@ async function deleteReturn(id){
   await saveAdmin();
   renderAdminPage();
   showToast('삭제되었습니다');
+}
+
+function runStatusReport(){
+  const month = document.getElementById('reportMonth').value;
+  const head = document.getElementById('statusReportHead');
+  const body = document.getElementById('statusReportBody');
+  head.innerHTML = `<th>구분</th>${STORES.map(s=>`<th>${s}</th>`).join('')}<th>합계</th>`;
+
+  if(!month){
+    body.innerHTML = `<tr class="empty-row"><td colspan="${STORES.length+2}">조회할 월을 선택해주세요.</td></tr>`;
+    return;
+  }
+
+  const rows = REPORT_TYPES.map(type=>{
+    let rowTotal = 0;
+    const cells = STORES.map(s=>{
+      const sum = STATE.stores[s].records
+        .filter(r=> r.date && r.date.slice(0,7)===month && r.type===type)
+        .reduce((a,r)=>a+Number(r.qty||0),0);
+      rowTotal += sum;
+      return sum;
+    });
+    return {type, cells, rowTotal};
+  });
+
+  body.innerHTML = rows.map(r=>`
+    <tr>
+      <td>${r.type}</td>
+      ${r.cells.map(c=>`<td>${fmtNum(c)}</td>`).join('')}
+      <td><strong>${fmtNum(r.rowTotal)}</strong></td>
+    </tr>`).join('');
+}
+
+function runPosReport(){
+  const month = document.getElementById('posReportMonth').value;
+  const head = document.getElementById('posReportHead');
+  const body = document.getElementById('posReportBody');
+  head.innerHTML = `<th>구분</th>${STORES.map(s=>`<th>${s}</th>`).join('')}<th>합계</th>`;
+
+  if(!month){
+    body.innerHTML = `<tr class="empty-row"><td colspan="${STORES.length+2}">조회할 월을 선택해주세요.</td></tr>`;
+    return;
+  }
+
+  const counts = STORES.map(s=> STATE.stores[s].pos.filter(p=> p.date && p.date.slice(0,7)===month).length);
+  const amounts = STORES.map(s=> STATE.stores[s].pos
+    .filter(p=> p.date && p.date.slice(0,7)===month)
+    .reduce((a,p)=>a+Number(p.amount||0),0));
+  const countTotal = counts.reduce((a,b)=>a+b,0);
+  const amountTotal = amounts.reduce((a,b)=>a+b,0);
+
+  body.innerHTML = `
+    <tr><td>건수</td>${counts.map(c=>`<td>${fmtNum(c)}</td>`).join('')}<td><strong>${fmtNum(countTotal)}</strong></td></tr>
+    <tr><td>금액</td>${amounts.map(a=>`<td>${fmtNum(a)}원</td>`).join('')}<td><strong>${fmtNum(amountTotal)}원</strong></td></tr>
+  `;
 }
 
 function downloadExcel(){
