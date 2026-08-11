@@ -418,11 +418,26 @@ function showToast(msg){
   showToast._tm = setTimeout(()=>t.classList.remove('show'), 1800);
 }
 
+// Firebase Realtime Database는 빈 배열([])을 저장하면 해당 경로를 아예 지워버립니다.
+// 그래서 불러온 데이터에 필드가 통째로 없을 수 있어 항상 기본값으로 보정해줍니다.
+function normalizeStoreData(raw){
+  return { records: (raw && raw.records) || [], pos: (raw && raw.pos) || [] };
+}
+function normalizeAdminData(raw){
+  return {
+    supply: (raw && raw.supply) || [],
+    outbound: (raw && raw.outbound) || [],
+    returns: (raw && raw.returns) || []
+  };
+}
+
 async function loadAll(){
   for(const s of STORES){
-    STATE.stores[s] = await DB.get('store_'+s, { records:[], pos:[] });
+    const raw = await DB.get('store_'+s, null);
+    STATE.stores[s] = normalizeStoreData(raw);
   }
-  STATE.admin = await DB.get('admin', { supply:[], outbound:[], returns:[] });
+  const rawAdmin = await DB.get('admin', null);
+  STATE.admin = normalizeAdminData(rawAdmin);
 }
 
 async function saveStore(name){ await DB.set('store_'+name, STATE.stores[name]); }
@@ -523,7 +538,7 @@ async function go(page, storeName){
     STATE.currentStore = storeName;
     document.getElementById('page-store').classList.add('active');
     showToast('불러오는 중...');
-    STATE.stores[storeName] = await DB.get('store_'+storeName, { records:[], pos:[] });
+    STATE.stores[storeName] = normalizeStoreData(await DB.get('store_'+storeName, null));
     renderStorePage(storeName);
   } else if(page === 'admin'){
     document.getElementById('page-admin').classList.add('active');
@@ -1028,7 +1043,7 @@ function downloadExcel(){
 /* 탭으로 돌아왔을 때 최신 데이터로 자동 새로고침 (다른 기기에서 입력한 내용 반영) */
 window.addEventListener('focus', async ()=>{
   if(document.getElementById('page-store').classList.contains('active') && STATE.currentStore){
-    STATE.stores[STATE.currentStore] = await DB.get('store_'+STATE.currentStore, { records:[], pos:[] });
+    STATE.stores[STATE.currentStore] = normalizeStoreData(await DB.get('store_'+STATE.currentStore, null));
     renderStorePage(STATE.currentStore);
   } else if(document.getElementById('page-admin').classList.contains('active')){
     await loadAll();
