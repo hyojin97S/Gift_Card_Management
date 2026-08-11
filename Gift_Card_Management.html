@@ -528,6 +528,10 @@ async function go(page, storeName){
   if(page === 'admin'){
     const ok = await ensureAdminUnlocked();
     if(!ok) return;
+  } else {
+    // 관리팀 페이지를 벗어나면 다시 잠금 상태로 돌아갑니다 (재입장 시 비밀번호 재입력 필요)
+    adminUnlockedThisSession = false;
+    sessionStorage.removeItem('harehare_admin_unlocked');
   }
 
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
