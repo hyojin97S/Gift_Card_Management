@@ -134,6 +134,10 @@
   .confirm-box p{margin:0 0 20px; font-size:14.5px; color:var(--brown-dark); line-height:1.5;}
   .confirm-actions{display:flex; gap:10px; justify-content:center;}
   .confirm-actions .btn{flex:1;}
+  .confirm-box input[type="password"]{
+    width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+    font-size:14px; margin-bottom:16px; font-family:inherit; box-sizing:border-box;
+  }
 </style>
 </head>
 <body>
@@ -141,7 +145,7 @@
 <nav id="topnav">
   <div class="brand-left" onclick="go('home')" title="홈으로 이동">🥐 HAREHARE</div>
   <div class="brand-center"></div>
-  <div id="syncTag"><span class="led"></span> 로컬 저장 모드</div>
+  <div id="syncTag"><span class="led"></span> 연결 확인 중...</div>
 </nav>
 
 <main>
@@ -210,8 +214,9 @@
         <h2>🏢 관리팀 상품권 관리</h2>
         <div class="sub">전체 상품권 흐름과 매장 현황을 한눈에 확인하고 관리합니다.</div>
       </div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="back-link" onclick="go('home')">← 홈으로</button>
+        <button class="btn btn-outline" onclick="changeAdminPassword()">🔑 비밀번호 변경</button>
         <button class="btn btn-dark" onclick="downloadExcel()">📥 엑셀 다운로드</button>
       </div>
     </div>
@@ -310,17 +315,57 @@
 <div class="toast" id="toast"></div>
 
 <script>
+/* =========================================================================
+   🔧 설정: Firebase Realtime Database 주소를 아래에 입력하세요.
+   - 생산일지 앱(제품 생산 및 출고 일지)과 같은 Firebase 프로젝트를 쓰고 있다면
+     그 앱 코드에 있는 FB_URL 값을 그대로 복사해서 붙여넣으면 됩니다.
+     (데이터는 "harehare_giftcard"라는 별도 경로에 저장되어 생산일지 데이터와 섞이지 않습니다.)
+   - 새로 만들 경우: Firebase 콘솔(console.firebase.google.com) → 프로젝트 생성 →
+     빌드 → Realtime Database → 데이터베이스 만들기(테스트 모드) 후 나오는
+     "https://프로젝트이름-default-rtdb.리전.firebasedatabase.app" 형태의 주소를 넣으세요.
+   ========================================================================= */
+const FB_URL = "https://gift-card-management-d3178-default-rtdb.asia-southeast1.firebasedatabase.app";
+const FB_ROOT = "harehare_giftcard";
+
 const DB = {
-  _key(k){ return "harehare_" + k; },
   async get(key, fallback){
-    const raw = localStorage.getItem(this._key(key));
-    return raw ? JSON.parse(raw) : fallback;
+    try{
+      const res = await fetch(`${FB_URL}/${FB_ROOT}/${key}.json`);
+      if(!res.ok) throw new Error('status ' + res.status);
+      const data = await res.json();
+      setSyncStatus(true);
+      return (data === null || data === undefined) ? fallback : data;
+    }catch(e){
+      console.error('Firebase 불러오기 실패:', e);
+      setSyncStatus(false);
+      return fallback;
+    }
   },
   async set(key, value){
-    localStorage.setItem(this._key(key), JSON.stringify(value));
-    return true;
+    try{
+      const res = await fetch(`${FB_URL}/${FB_ROOT}/${key}.json`, {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(value)
+      });
+      if(!res.ok) throw new Error('status ' + res.status);
+      setSyncStatus(true);
+      return true;
+    }catch(e){
+      console.error('Firebase 저장 실패:', e);
+      setSyncStatus(false);
+      return false;
+    }
   }
 };
+
+function setSyncStatus(ok){
+  const tag = document.getElementById('syncTag');
+  if(!tag) return;
+  tag.innerHTML = ok
+    ? '<span class="led"></span> 실시간 동기화'
+    : '<span class="led" style="background:var(--danger);"></span> 동기화 오류 (인터넷/주소 확인)';
+}
 
 const STORES = ["도안점","둔산점","갤러리아점","유성점","건양대점"];
 // 요청 반영: "현재 매장 보유" 항목 추가
@@ -332,6 +377,8 @@ let STATE = {
   admin: { supply:[], outbound:[], returns:[] },
   currentStore: null
 };
+
+let adminUnlockedThisSession = false;
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
@@ -381,16 +428,107 @@ async function loadAll(){
 async function saveStore(name){ await DB.set('store_'+name, STATE.stores[name]); }
 async function saveAdmin(){ await DB.set('admin', STATE.admin); }
 
-function go(page, storeName){
+/* ===== 관리팀 비밀번호 ===== */
+async function getAdminPassword(){
+  const settings = await DB.get('settings', { adminPassword: 'hare1234' });
+  return settings.adminPassword || 'hare1234';
+}
+
+async function ensureAdminUnlocked(){
+  if(adminUnlockedThisSession) return true;
+  if(sessionStorage.getItem('harehare_admin_unlocked') === '1'){
+    adminUnlockedThisSession = true;
+    return true;
+  }
+  return await showAdminAuthPrompt();
+}
+
+function showAdminAuthPrompt(){
+  return new Promise(resolve=>{
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <p>🔒 관리팀 페이지 비밀번호를 입력하세요.</p>
+        <input type="password" id="adminPwInput" placeholder="비밀번호">
+        <div class="confirm-actions">
+          <button class="btn btn-outline" data-act="no">취소</button>
+          <button class="btn btn-dark" data-act="yes">확인</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#adminPwInput');
+    setTimeout(()=>input.focus(), 50);
+
+    async function attempt(){
+      const val = input.value;
+      const correct = await getAdminPassword();
+      if(val === correct){
+        adminUnlockedThisSession = true;
+        sessionStorage.setItem('harehare_admin_unlocked', '1');
+        close(true);
+      } else {
+        showToast('비밀번호가 틀렸습니다');
+        input.value = '';
+        input.focus();
+      }
+    }
+    function close(result){
+      document.body.removeChild(overlay);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    }
+    function onKey(e){
+      if(e.key === 'Escape') close(false);
+      if(e.key === 'Enter') attempt();
+    }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close(false); });
+    overlay.querySelector('[data-act="yes"]').onclick = attempt;
+    overlay.querySelector('[data-act="no"]').onclick = ()=>close(false);
+  });
+}
+
+async function changeAdminPassword(){
+  const cur = prompt('현재 비밀번호를 입력하세요');
+  if(cur === null) return;
+  const correct = await getAdminPassword();
+  if(cur !== correct){ showToast('현재 비밀번호가 일치하지 않습니다'); return; }
+
+  const next = prompt('새 비밀번호를 입력하세요 (4자 이상)');
+  if(next === null) return;
+  if(next.length < 4){ showToast('4자 이상 입력해주세요'); return; }
+
+  const confirmNext = prompt('새 비밀번호를 한 번 더 입력하세요');
+  if(confirmNext !== next){ showToast('비밀번호가 서로 일치하지 않습니다'); return; }
+
+  const settings = await DB.get('settings', { adminPassword: 'hare1234' });
+  settings.adminPassword = next;
+  const ok = await DB.set('settings', settings);
+  showToast(ok ? '비밀번호가 변경되었습니다' : '저장에 실패했습니다. 연결을 확인해주세요');
+}
+
+/* ===== 페이지 이동 ===== */
+async function go(page, storeName){
+  if(page === 'admin'){
+    const ok = await ensureAdminUnlocked();
+    if(!ok) return;
+  }
+
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+
   if(page === 'home'){
     document.getElementById('page-home').classList.add('active');
   } else if(page === 'store'){
     STATE.currentStore = storeName;
     document.getElementById('page-store').classList.add('active');
+    showToast('불러오는 중...');
+    STATE.stores[storeName] = await DB.get('store_'+storeName, { records:[], pos:[] });
     renderStorePage(storeName);
   } else if(page === 'admin'){
     document.getElementById('page-admin').classList.add('active');
+    showToast('불러오는 중...');
+    await loadAll();
     renderAdminPage();
   }
   window.scrollTo({top:0, behavior:'smooth'});
@@ -887,9 +1025,19 @@ function downloadExcel(){
   XLSX.writeFile(wb, `HAREHARE_상품권관리_${todayStr()}.xlsx`);
 }
 
+/* 탭으로 돌아왔을 때 최신 데이터로 자동 새로고침 (다른 기기에서 입력한 내용 반영) */
+window.addEventListener('focus', async ()=>{
+  if(document.getElementById('page-store').classList.contains('active') && STATE.currentStore){
+    STATE.stores[STATE.currentStore] = await DB.get('store_'+STATE.currentStore, { records:[], pos:[] });
+    renderStorePage(STATE.currentStore);
+  } else if(document.getElementById('page-admin').classList.contains('active')){
+    await loadAll();
+    renderAdminPage();
+  }
+});
+
 // 초기화
-window.addEventListener('DOMContentLoaded', async ()=>{
-  await loadAll();
+window.addEventListener('DOMContentLoaded', ()=>{
   renderHome();
 });
 </script>
