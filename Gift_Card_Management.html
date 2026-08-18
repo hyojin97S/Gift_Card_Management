@@ -369,8 +369,8 @@ function setSyncStatus(ok){
 
 const STORES = ["도안점","둔산점","갤러리아점","유성점","건양대점"];
 // 요청 반영: "현재 매장 보유" 항목 추가
-const RECORD_TYPES = ["관리부 수령", "현재 매장 보유", "상품권 판매", "고객 사용", "재사용 상품권", "폐기용 상품권"];
-const REPORT_TYPES = ["관리부 수령", "현재 매장 보유", "상품권 판매", "고객 사용", "재사용 상품권", "폐기용 상품권"];
+const RECORD_TYPES = ["관리부 수령", "현재 매장 보유", "상품권 판매", "고객 사용", "재사용 상품권", "회수용 상품권"];
+const REPORT_TYPES = ["관리부 수령", "현재 매장 보유", "상품권 판매", "고객 사용", "재사용 상품권", "회수용 상품권"];
 
 let STATE = {
   stores: {},
@@ -585,7 +585,7 @@ function renderStorePage(name){
   const grid = document.getElementById('storeStatusGrid');
   grid.innerHTML = "";
   RECORD_TYPES.forEach(t=>{
-    const cls = (t==='폐기용 상품권') ? 'warn' : 'gold';
+    const cls = (t==='회수용 상품권') ? 'warn' : 'gold';
     grid.innerHTML += `
       <div class="status-card ${cls}">
         <div class="label">${t}</div>
